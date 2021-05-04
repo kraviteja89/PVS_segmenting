@@ -30,6 +30,10 @@ def learn_pvs_model(model, pvs_samples, roi_samples, validation_split=0.2, batch
 
 
 def model_from_vgg(last_layer='pool4'):
+    """
+    returns a neural network with layers upto <last_layer> from vgg16
+    with the weights for the vggface layers preloaded
+    """
     vgg_model = VGGFace(model='vgg16', include_top=False, input_shape=(224, 224, 3))
     X = vgg_model.get_layer(last_layer).output
     layer_shape = vgg_model.get_layer(last_layer).output_shape
@@ -62,14 +66,16 @@ def make_color_images(green_data, red_data):
 
 
 if __name__ == "__main__":
+    # data file location
     animal_ID = 'RK050'
     day_ID = '210425'
     file_num = '002'
     frame_size = 224
-    last_layer = 'pool4'
+    last_layer = 'pool4'  # change this value to alter the last layer of vgg16
     pvs_fname = "datasets//" + animal_ID + '_' + day_ID + '_' + file_num + '_python.mat'
     pvs_file = h5py.File(pvs_fname, 'r')
 
+    #  read the data from matlab file
     green_samples = np.array(pvs_file["image_samples_g"])
     red_samples = np.array(pvs_file["image_samples_r"])
 
@@ -78,15 +84,15 @@ if __name__ == "__main__":
 
     roi_samples = np.array(pvs_file["ROI_samples"])
     pvs_file.close()
+
     roi_samples = roi_samples.reshape([-1, frame_size, frame_size])
 
     colored_samples = make_color_images(1-green_samples.reshape([-1, frame_size, frame_size]),
                                         red_samples.reshape([-1, frame_size, frame_size]))
 
-
-
+    # if learned model exists load the data
+    # otherwise create the neural network and learn the weights
     file_name2 = pvs_fname[:-11] + "from_vgg" + last_layer
-
     if os.path.exists(file_name2):
         print("Model exists....loading from file: " + file_name2)
         model2 = load_model(file_name2)
@@ -95,16 +101,18 @@ if __name__ == "__main__":
         model2 = learn_pvs_model(model2, colored_samples, roi_samples, n_epochs=75, validation_split=0.0, learning_rate=0.0002)
         model2.save(file_name2)
 
+    #  calculate the ROIs and areas for the all slices and frames
     n_frames, n_slices, ht, wd = green_data.shape
-    #PVS_ROIs = np.zeros_like(green_data)
     colored_data = make_color_images(1-green_data.reshape([-1, ht, wd]), red_data.reshape([-1, ht, wd]))
     PVS_ROIs = model2.predict(colored_data) > 0.5
     PVS_ROIs = PVS_ROIs.reshape([n_frames, n_slices, ht, wd]).astype(int)
     PVS_areas = np.sum(PVS_ROIs, axis=(2, 3))
 
+    # plot PVS areas
     fig1 = plt.figure()
     plt.plot(PVS_areas)
 
+    #  plot sample segmented images in each slice
     for n in range(n_slices):
         colored_data1 = make_color_images(green_data[:, n, :, :], red_data[:, n, :, :])
         n1 = np.random.randint(n_frames)
@@ -114,6 +122,7 @@ if __name__ == "__main__":
 
     plt.show()
 
+    #  save segmented data
     roi_fname = "datasets//" + animal_ID + '_' + day_ID + '_' + file_num + '_vgg16_' + last_layer + '.h5'
     roi_file = h5py.File(roi_fname, 'w')
     roi_file['PVS_areas'] = PVS_areas
